@@ -273,7 +273,7 @@ button, input, select, textarea{font-family:inherit;}
 }
 .entry-thumb{
   display:block;
-  align-self:stretch; width:92px; height:100%; min-height:0; min-width:0; object-fit:contain; object-position:center;
+  align-self:stretch; width:92px; height:100%; min-height:0; min-width:0; object-fit:contain; object-position:right center;
   flex-shrink:0; background:var(--surface);
 }
 .entry-body{
@@ -531,7 +531,10 @@ button, input, select, textarea{font-family:inherit;}
   .entry-card{height:80px;}
   .stub{width:62px; padding:6px;}
   .entry-thumb{width:76px;}
-  .cal-day{min-height:64px;}
+  .cal-grid{gap:4px;}
+  .cal-day{min-height:64px; padding:4px;}
+  .cal-icons{gap:3px;}
+  .cal-icons .cal-icon{width:11px; height:11px;}
   .modal{padding:18px;}
   .modal-actions{gap:6px;}
   .modal-actions .btn{flex:1 1 0; min-width:0; padding:10px 6px; font-size:10px; letter-spacing:.5px;}
