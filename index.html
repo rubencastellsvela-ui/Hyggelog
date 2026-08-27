@@ -54,7 +54,13 @@ button, input, select, textarea{font-family:inherit;}
   border-bottom:1px solid var(--line);
 }
 .brand{
-  display:flex; align-items:baseline; gap:10px;
+  display:flex; align-items:center; gap:10px;
+}
+.brand-icon{
+  width:30px; height:30px;
+  border-radius:7px;
+  object-fit:cover;
+  flex-shrink:0;
 }
 .brand-mark{
   font-family:var(--font-display);
@@ -315,6 +321,32 @@ button, input, select, textarea{font-family:inherit;}
   width:34px; height:34px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--ink);
 }
 .cal-nav:hover{border-color:var(--accent); color:var(--accent);}
+
+/* ===== Barra de periodo (mes por defecto en Lista / Mosaico) ===== */
+.period-bar{
+  display:flex; align-items:center; justify-content:center; gap:14px;
+  margin-bottom:18px;
+}
+.period-bar .period-label{
+  font-family:var(--font-display); font-size:20px; letter-spacing:1px; min-width:150px; text-align:center;
+}
+.period-bar .cal-nav{width:28px; height:28px;}
+.period-all-btn{
+  font-family:var(--font-mono); font-size:10px; letter-spacing:1px; text-transform:uppercase;
+  border:1px solid var(--line-strong); background:var(--surface); color:var(--ink-soft);
+  border-radius:999px; padding:7px 14px; cursor:pointer; white-space:nowrap;
+}
+.period-all-btn:hover{border-color:var(--accent); color:var(--accent);}
+.period-all-btn.active{background:var(--accent); color:var(--accent-ink); border-color:transparent;}
+.period-bar-note{
+  font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); text-align:center;
+  padding:4px 0 18px 0; letter-spacing:.5px;
+}
+@media (max-width:640px){
+  .period-bar{gap:10px;}
+  .period-bar .period-label{font-size:17px; min-width:120px;}
+}
+
 .cal-grid{
   display:grid; grid-template-columns:repeat(7,1fr); gap:6px;
 }
@@ -420,6 +452,9 @@ button, input, select, textarea{font-family:inherit;}
 }
 .bar-fill{height:100%; background:var(--c, var(--accent)); border-radius:999px; transition:width .4s ease;}
 .bar-count{font-family:var(--font-mono); font-size:12px; width:26px; text-align:right; color:var(--ink);}
+.history-year-bars{margin-bottom:30px;}
+.history-year-bars .bar-label{width:48px; justify-content:flex-end; font-family:var(--font-mono);}
+.history-year-bars .bar-fill{background:var(--accent);}
 
 .month-breakdown{margin-top:36px;}
 .empty-hint{font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); text-align:center; padding:24px 0;}
@@ -434,6 +469,11 @@ button, input, select, textarea{font-family:inherit;}
 .section-title{
   font-family:var(--font-display); font-size:20px; letter-spacing:1px; margin-bottom:14px;
 }
+.section-title-row{
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px;
+}
+.section-title-row .section-title{margin-bottom:0;}
+.seg-sm button{padding:6px 12px; font-size:9.5px;}
 .mb-row{
   display:grid; grid-template-columns:38px 1fr 26px; align-items:center; gap:8px; margin-bottom:8px;
 }
@@ -524,6 +564,7 @@ button, input, select, textarea{font-family:inherit;}
 @media (max-width:640px){
   .topbar{padding:12px 14px;}
   .brand-mark{font-size:24px;}
+  .brand-icon{width:26px; height:26px;}
   .add-btn{padding:10px; border-radius:50%;}
   .add-btn-text{display:none;}
   .view-wrap{padding:14px;}
@@ -545,6 +586,7 @@ button, input, select, textarea{font-family:inherit;}
 
 <div class="topbar">
   <div class="brand">
+    <img src="icon-512.png" alt="" class="brand-icon">
     <span class="brand-mark">Hyggelog</span>
   </div>
   <div class="topbar-actions">
@@ -756,12 +798,41 @@ const FIREBASE_PROJECT_ID = 'hyggelog-95ccf';
 const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/diarios`;
 const SYNC_CODE_KEY = 'bitacora_sync_code';
 const LAST_SYNC_KEY = 'bitacora_last_sync_at';
+const SYNC_MARKER_KEY = 'bitacora_sync_marker';
 const CHUNK_BYTES = 1400; // margen de seguridad bajo el límite de 1500 bytes indexados de Firestore
 const MAX_ENTRY_BYTES = 950000; // margen bajo el límite de ~1 MiB por documento (por entrada, no por diario)
 
 function docUrl(code){ return `${FIRESTORE_BASE}/${encodeURIComponent(code)}`; }
 function entriesUrl(code){ return `${docUrl(code)}/entries`; }
 function entryUrl(code, id){ return `${entriesUrl(code)}/${encodeURIComponent(id)}`; }
+/* ---------- Marca ligera de última modificación ----------
+   El documento padre (diarios/{code}) guarda un solo campo "lastModified".
+   Cualquier dispositivo que suba o borre una entrada actualiza esa marca.
+   El sondeo automático en segundo plano solo lee ESE documento (1 lectura)
+   en vez de las 1500+ entradas; solo si la marca ha cambiado se dispara una
+   reconciliación completa. Esto es lo que evita agotar la cuota gratuita de
+   lecturas de Firestore con la app abierta durante horas.               */
+async function getCloudMarker(code){
+  try{
+    const res = await fetch(docUrl(code));
+    if(res.status===404) return {ok:true, marker:null};
+    if(!res.ok) return {ok:false};
+    const json = await res.json();
+    const m = json.fields && json.fields.lastModified && json.fields.lastModified.timestampValue;
+    return {ok:true, marker:m||null};
+  }catch(e){ return {ok:false}; }
+}
+async function bumpCloudMarker(code){
+  if(!code) return;
+  const iso = new Date().toISOString();
+  try{
+    await fetch(docUrl(code) + '?updateMask.fieldPaths=lastModified', {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({fields:{lastModified:{timestampValue:iso}}})
+    });
+    localStorage.setItem(SYNC_MARKER_KEY, iso);
+  }catch(e){ /* si falla, la próxima reconciliación completa lo detectará igualmente */ }
+}
 function setSyncStatus(msg, isError){
   const el = document.getElementById('syncStatus');
   if(el) el.textContent = msg;
@@ -825,6 +896,7 @@ async function pushEntryToCloud(entry){
     if(res.ok){
       entry.synced = true;
       setSyncStatus('Sincronizado ✓ ' + new Date().toLocaleTimeString());
+      bumpCloudMarker(code);
       return {ok:true};
     } else {
       const detail = await firestoreErrorDetail(res);
@@ -841,7 +913,7 @@ async function deleteEntryFromCloud(id){
   if(!code) return {ok:true};
   try{
     const res = await fetch(entryUrl(code, id), { method:'DELETE' });
-    if(res.ok || res.status===404) return {ok:true};
+    if(res.ok || res.status===404){ bumpCloudMarker(code); return {ok:true}; }
     const detail = await firestoreErrorDetail(res);
     setSyncStatus('No se pudo borrar en la nube (código ' + res.status + ')' + detail, true);
     return {ok:false};
@@ -901,6 +973,8 @@ async function connectSync(code){
     saveEntries();
     setSyncStatus('Conectado ✓ (código nuevo, se ha subido lo que tenías aquí)');
   }
+  const markerCheck = await getCloudMarker(code);
+  if(markerCheck.ok && markerCheck.marker) localStorage.setItem(SYNC_MARKER_KEY, markerCheck.marker);
   startSyncPolling();
 }
 
@@ -958,6 +1032,14 @@ async function reconcileWithCloud(opts){
     setSyncStatus('Ya tienes la versión más reciente.');
   }
   localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
+  const markerCheck = await getCloudMarker(code);
+  if(markerCheck.ok && markerCheck.marker){
+    localStorage.setItem(SYNC_MARKER_KEY, markerCheck.marker);
+  } else if(markerCheck.ok){
+    // Diario sin marca todavía (p.ej. de antes de este cambio): la creamos
+    // ahora para que las próximas comprobaciones automáticas sean ligeras.
+    await bumpCloudMarker(code);
+  }
 }
 async function manualPull(){
   const code = localStorage.getItem(SYNC_CODE_KEY);
@@ -966,7 +1048,12 @@ async function manualPull(){
   await reconcileWithCloud({});
 }
 
-/* ---------- Comprobación automática en segundo plano ---------- */
+/* ---------- Comprobación automática en segundo plano ----------
+   Antes esto hacía una reconciliación completa (todas las entradas) cada 15
+   segundos, lo que agotaba la cuota gratuita de lecturas de Firestore con la
+   app abierta un rato. Ahora primero se comprueba solo la marca de última
+   modificación (1 lectura); solo si ha cambiado de verdad se hace la
+   reconciliación completa. */
 const SYNC_POLL_MS = 15000;
 let syncPollTimer = null;
 async function silentPull(){
@@ -974,6 +1061,10 @@ async function silentPull(){
   if(!code) return;
   // No interrumpir si hay algo abierto (evita perder una edición en curso)
   if(overlay.classList.contains('open') || syncOverlay.classList.contains('open')) return;
+  const check = await getCloudMarker(code);
+  if(!check.ok) return; // fallo puntual: se reintenta en el próximo ciclo, sin gastar más peticiones
+  const known = localStorage.getItem(SYNC_MARKER_KEY);
+  if(check.marker && check.marker === known) return; // nada nuevo: no hace falta traer todas las entradas
   await reconcileWithCloud({silent:true});
 }
 function startSyncPolling(){
@@ -1002,7 +1093,9 @@ let state = {
   filterCats:new Set(),
   filterFrom:'', filterTo:'', filterTitle:'', filterOpen:false, calendarDrillDate:null,
   calYear:new Date().getFullYear(), calMonth:new Date().getMonth(),
+  periodMode:'mes', periodYear:new Date().getFullYear(), periodMonth:new Date().getMonth(),
   statsMode:'mes', statsYear:new Date().getFullYear(), statsMonth:new Date().getMonth(),
+  historyBarMode:'anio',
   editingId:null, tempImage:null
 };
 
@@ -1018,12 +1111,22 @@ function todayStr(){
 }
 function uid(){ return 'e'+Date.now()+Math.random().toString(36).slice(2,7); }
 
+function hasActiveFilters(){
+  return !!(state.filterTitle || state.filterCats.size>0 || state.filterFrom || state.filterTo || state.calendarDrillDate);
+}
 function matchesFilter(e){
   if(state.calendarDrillDate) return e.date === state.calendarDrillDate;
   if(state.filterTitle && !(e.title||'').toLowerCase().includes(state.filterTitle.toLowerCase())) return false;
   if(state.filterCats.size>0 && !state.filterCats.has(e.category)) return false;
   if(state.filterFrom && e.date < state.filterFrom) return false;
   if(state.filterTo && e.date > state.filterTo) return false;
+  // En Lista/Mosaico, sin filtros activos, se restringe al mes elegido para
+  // no renderizar el diario entero de golpe. En cuanto hay un filtro real
+  // (arriba), se busca sobre todas las entradas sin este límite.
+  if((state.view==='lista' || state.view==='mosaico') && state.periodMode==='mes' && !hasActiveFilters()){
+    const d = fmtDate(e.date);
+    if(d.y!==state.periodYear || d.m!==state.periodMonth) return false;
+  }
   return true;
 }
 function filteredEntries(){
@@ -1108,11 +1211,43 @@ document.getElementById('filterToggle').addEventListener('click', ()=>{
 /* ---------- Render: vista Lista ---------- */
 function renderLista(){
   const list = filteredEntries();
-  if(list.length===0) return emptyState();
-  let html = '<div class="list-view">';
+  let html = periodBarHTML();
+  if(list.length===0) return html + emptyState();
+  html += '<div class="list-view">';
   list.forEach(e=>{ html += entryCardHTML(e); });
   html += '</div>';
   return html;
+}
+function periodBarHTML(){
+  if(hasActiveFilters()){
+    return `<div class="period-bar period-bar-note">Buscando en todo el diario (filtros activos)</div>`;
+  }
+  const label = state.periodMode==='todas' ? 'Todo el diario' : (MONTHS[state.periodMonth] + ' ' + state.periodYear);
+  return `<div class="period-bar">
+    <div class="cal-nav" id="periodPrev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></div>
+    <div class="period-label">${label}</div>
+    <div class="cal-nav" id="periodNext"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div>
+    <button class="period-all-btn ${state.periodMode==='todas'?'active':''}" id="periodAllBtn">${state.periodMode==='todas' ? 'Ver por mes' : 'Ver todas'}</button>
+  </div>`;
+}
+function bindPeriodBarEvents(){
+  const prev = document.getElementById('periodPrev');
+  const next = document.getElementById('periodNext');
+  const allBtn = document.getElementById('periodAllBtn');
+  if(prev) prev.addEventListener('click', ()=>{
+    state.periodMode='mes';
+    state.periodMonth--; if(state.periodMonth<0){state.periodMonth=11; state.periodYear--;}
+    renderView();
+  });
+  if(next) next.addEventListener('click', ()=>{
+    state.periodMode='mes';
+    state.periodMonth++; if(state.periodMonth>11){state.periodMonth=0; state.periodYear++;}
+    renderView();
+  });
+  if(allBtn) allBtn.addEventListener('click', ()=>{
+    state.periodMode = state.periodMode==='todas' ? 'mes' : 'todas';
+    renderView();
+  });
 }
 function entryCardHTML(e){
   const d = fmtDate(e.date);
@@ -1179,14 +1314,15 @@ function renderCalendario(){
 /* ---------- Render: vista Mosaico ---------- */
 function renderMosaico(){
   const list = filteredEntries();
-  if(list.length===0) return emptyState();
+  const periodBar = periodBarHTML();
+  if(list.length===0) return periodBar + emptyState();
   const groups = {};
   const order = [];
   list.forEach(e=>{
     if(!groups[e.date]){ groups[e.date]=[]; order.push(e.date); }
     groups[e.date].push(e);
   });
-  let html = '';
+  let html = periodBar;
   order.forEach(date=>{
     const d = fmtDate(date);
     html += `<div class="mosaic-day">
@@ -1296,6 +1432,42 @@ function renderHistoryChart(){
     const y = fmtDate(e.date).y;
     if(perYear[y]) perYear[y][e.category] = (perYear[y][e.category]||0) + 1;
   });
+
+  // Total de entradas (barras), con selector: por año o por categoría.
+  const barMode = state.historyBarMode === 'categoria' ? 'categoria' : 'anio';
+  let barsSection = `<div class="section-title-row">
+    <div class="section-title">Total ${barMode==='anio' ? 'por año' : 'por categoría'}</div>
+    <div class="seg seg-sm">
+      <button data-hbmode="anio" class="${barMode==='anio'?'active':''}">Año</button>
+      <button data-hbmode="categoria" class="${barMode==='categoria'?'active':''}">Categoría</button>
+    </div>
+  </div>`;
+  if(barMode==='anio'){
+    const yearTotals = {};
+    years.forEach(y=> yearTotals[y] = CAT_KEYS.reduce((sum,k)=> sum+perYear[y][k], 0));
+    const maxYearTotal = Math.max(1, ...Object.values(yearTotals));
+    barsSection += '<div class="history-year-bars">';
+    years.forEach(y=>{
+      barsSection += `<div class="bar-row">
+        <div class="bar-label">${y}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${(yearTotals[y]/maxYearTotal*100)}%"></div></div>
+        <div class="bar-count">${yearTotals[y]}</div>
+      </div>`;
+    });
+    barsSection += '</div>';
+  } else {
+    const catTotals = {}; CAT_KEYS.forEach(k=> catTotals[k]=0);
+    entries.forEach(e=> catTotals[e.category]++ );
+    const maxCatTotal = Math.max(1, ...Object.values(catTotals));
+    CAT_KEYS.forEach(k=>{
+      barsSection += `<div class="bar-row">
+        <div class="bar-label" style="--c:var(--cat-${k})">${ICONS[k]}${CATEGORIES[k].label}</div>
+        <div class="bar-track"><div class="bar-fill" style="--c:var(--cat-${k}); width:${(catTotals[k]/maxCatTotal*100)}%"></div></div>
+        <div class="bar-count">${catTotals[k]}</div>
+      </div>`;
+    });
+  }
+
   let maxVal = 1;
   years.forEach(y=> CAT_KEYS.forEach(k=>{ maxVal = Math.max(maxVal, perYear[y][k]); }));
 
@@ -1304,7 +1476,10 @@ function renderHistoryChart(){
   const chartW = W-padL-padR, chartH = H-padT-padB;
   const xStep = years.length>1 ? chartW/(years.length-1) : 0;
   const xFor = i => padL + (years.length>1 ? i*xStep : chartW/2);
-  const yFor = v => padT + chartH - (v/maxVal*chartH);
+  // Escala de raíz cuadrada en el eje Y: comprime los valores altos y separa
+  // los bajos, para que las líneas con pocas entradas no se amontonen abajo.
+  const sqrtMax = Math.sqrt(maxVal);
+  const yFor = v => padT + chartH - (Math.sqrt(v)/sqrtMax*chartH);
 
   let grid = '';
   const ySteps = Math.min(4, maxVal);
@@ -1328,7 +1503,9 @@ function renderHistoryChart(){
   CAT_KEYS.forEach(k=>{ legend += `<div class="history-legend-item" style="--c:var(--cat-${k})">${ICONS[k]}<span>${CATEGORIES[k].label}</span></div>`; });
   legend += '</div>';
 
-  return `<div class="history-chart">
+  return `${barsSection}
+  <div class="section-title">Evolución por categoría</div>
+  <div class="history-chart">
     <svg viewBox="0 0 ${W} ${H}" class="history-svg">${grid}${lines}${xLabels}</svg>
     ${legend}
   </div>`;
@@ -1338,8 +1515,8 @@ function renderHistoryChart(){
 function renderView(){
   const wrap = document.getElementById('viewWrap');
   if(state.view==='calendario'){ wrap.innerHTML = renderCalendario(); bindCalendarEvents(); }
-  else if(state.view==='lista'){ wrap.innerHTML = renderLista(); bindListEvents(); }
-  else if(state.view==='mosaico'){ wrap.innerHTML = renderMosaico(); bindMosaicEvents(); }
+  else if(state.view==='lista'){ wrap.innerHTML = renderLista(); bindListEvents(); bindPeriodBarEvents(); }
+  else if(state.view==='mosaico'){ wrap.innerHTML = renderMosaico(); bindMosaicEvents(); bindPeriodBarEvents(); }
   else if(state.view==='stats'){ wrap.innerHTML = renderStats(); bindStatsEvents(); }
 }
 
@@ -1372,13 +1549,16 @@ function bindMosaicEvents(){
   });
 }
 function bindStatsEvents(){
-  document.querySelectorAll('.seg button').forEach(b=>{
+  document.querySelectorAll('.stats-controls > .seg > button').forEach(b=>{
     b.addEventListener('click', ()=>{ state.statsMode=b.dataset.mode; renderView(); });
   });
   const ySel = document.getElementById('statsYear');
   if(ySel) ySel.addEventListener('change', e=>{ state.statsYear=Number(e.target.value); renderView(); });
   const mSel = document.getElementById('statsMonth');
   if(mSel) mSel.addEventListener('change', e=>{ state.statsMonth=Number(e.target.value); renderView(); });
+  document.querySelectorAll('[data-hbmode]').forEach(b=>{
+    b.addEventListener('click', ()=>{ state.historyBarMode=b.dataset.hbmode; renderView(); });
+  });
 }
 
 function setActiveTab(){
