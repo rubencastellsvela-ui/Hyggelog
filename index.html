@@ -373,20 +373,15 @@ button, input, select, textarea{font-family:inherit;}
 .cal-more{font-family:var(--font-mono); font-size:9px; color:var(--ink-soft);}
 
 /* ===== Mosaic view ===== */
-.mosaic-day{margin-bottom:30px;}
-.mosaic-day-label{
-  font-family:var(--font-mono); font-size:11px; letter-spacing:1.5px; text-transform:uppercase;
-  color:var(--ink-soft); margin-bottom:10px;
-  display:flex; align-items:center; gap:10px;
-}
-.mosaic-day-label::after{content:""; flex:1; border-bottom:1px dashed var(--line-strong);}
 .mosaic-grid{
-  column-width:96px; column-gap:8px;
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(96px, 1fr));
+  gap:8px;
+  align-items:start;
 }
 .mosaic-tile{
   position:relative; background:var(--surface); border:1px solid var(--line); border-radius:4px;
   padding:5px 5px 8px 5px; box-shadow:var(--shadow); cursor:pointer;
-  break-inside:avoid; margin-bottom:8px; display:inline-block; width:100%;
 }
 .mosaic-tile img{
   width:100%; height:auto; display:block; border-radius:2px; background:var(--paper);
@@ -460,11 +455,18 @@ button, input, select, textarea{font-family:inherit;}
 .empty-hint{font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); text-align:center; padding:24px 0;}
 .history-chart{margin-top:8px; max-width:520px; margin-left:auto; margin-right:auto;}
 .history-svg{width:100%; height:auto; display:block;}
-.history-legend{display:flex; flex-wrap:wrap; gap:10px 14px; margin-top:12px; justify-content:center;}
+.history-legend{display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; justify-content:center;}
 .history-legend-item{
   display:flex; align-items:center; gap:4px;
   font-family:var(--font-mono); font-size:10px; color:var(--ink-soft);
+  background:var(--surface); border:1px solid var(--line-strong); border-radius:999px;
+  padding:5px 10px; cursor:pointer;
 }
+.history-legend-item:hover{border-color:var(--c, var(--accent));}
+.history-legend-item.active{
+  background:var(--c, var(--accent)); border-color:transparent; color:var(--accent-ink);
+}
+.history-legend-item.active svg{color:var(--accent-ink);}
 .history-legend-item svg{width:12px; height:12px; color:var(--c, var(--accent));}
 .section-title{
   font-family:var(--font-display); font-size:20px; letter-spacing:1px; margin-bottom:14px;
@@ -562,7 +564,11 @@ button, input, select, textarea{font-family:inherit;}
 .btn.danger{color:#fff; background:var(--cat-pelicula); border-color:transparent;}
 
 @media (max-width:640px){
-  .topbar{padding:12px 14px;}
+  .topbar{padding:12px 16px;}
+  .topbar-actions{gap:7px;}
+  .icon-btn{width:34px; height:34px;}
+  .icon-btn svg{width:16px; height:16px;}
+  .mosaic-grid{grid-template-columns:repeat(3,1fr);}
   .brand-mark{font-size:24px;}
   .brand-icon{width:26px; height:26px;}
   .add-btn{padding:10px; border-radius:50%;}
@@ -1095,7 +1101,7 @@ let state = {
   calYear:new Date().getFullYear(), calMonth:new Date().getMonth(),
   periodMode:'mes', periodYear:new Date().getFullYear(), periodMonth:new Date().getMonth(),
   statsMode:'mes', statsYear:new Date().getFullYear(), statsMonth:new Date().getMonth(),
-  historyBarMode:'anio',
+  historyMode:'anio', historyCatFilter:null,
   editingId:null, tempImage:null
 };
 
@@ -1316,29 +1322,17 @@ function renderMosaico(){
   const list = filteredEntries();
   const periodBar = periodBarHTML();
   if(list.length===0) return periodBar + emptyState();
-  const groups = {};
-  const order = [];
+  let html = periodBar + '<div class="mosaic-grid">';
   list.forEach(e=>{
-    if(!groups[e.date]){ groups[e.date]=[]; order.push(e.date); }
-    groups[e.date].push(e);
+    html += `<div class="mosaic-tile" data-id="${e.id}" style="--cat:var(--cat-${e.category})">
+      ${e.image ? `<img src="${e.image}">` : `<div class="noimg">${ICONS[e.category]}</div>`}
+      <div class="mosaic-meta">
+        <span class="mosaic-cat-icon">${ICONS[e.category]}</span>
+        <div class="mosaic-title">${escapeHTML(e.title) || CATEGORIES[e.category].label}</div>
+      </div>
+    </div>`;
   });
-  let html = periodBar;
-  order.forEach(date=>{
-    const d = fmtDate(date);
-    html += `<div class="mosaic-day">
-      <div class="mosaic-day-label">${d.day} de ${MONTHS[d.m]} de ${d.y}</div>
-      <div class="mosaic-grid">`;
-    groups[date].forEach(e=>{
-      html += `<div class="mosaic-tile" data-id="${e.id}" style="--cat:var(--cat-${e.category})">
-        ${e.image ? `<img src="${e.image}">` : `<div class="noimg">${ICONS[e.category]}</div>`}
-        <div class="mosaic-meta">
-          <span class="mosaic-cat-icon">${ICONS[e.category]}</span>
-          <div class="mosaic-title">${escapeHTML(e.title) || CATEGORIES[e.category].label}</div>
-        </div>
-      </div>`;
-    });
-    html += `</div></div>`;
-  });
+  html += '</div>';
   return html;
 }
 
@@ -1405,7 +1399,7 @@ function renderStats(){
       if(total>0){
         CAT_KEYS.forEach(k=>{
           const v = perMonth[i][k]||0;
-          if(v>0) segs += `<div class="mb-seg" style="background:var(--cat-${k}); flex:${v} 1 0;" title="${CATEGORIES[k].label}: ${v}"><span class="mb-seg-icon">${ICONS[k]}</span>${v}</div>`;
+          if(v>0) segs += `<div class="mb-seg" style="background:var(--cat-${k}); flex:${v} 1 0;" title="${CATEGORIES[k].label}: ${v}">${v}</div>`;
         });
       }
       breakdown += `<div class="mb-row">
@@ -1433,16 +1427,19 @@ function renderHistoryChart(){
     if(perYear[y]) perYear[y][e.category] = (perYear[y][e.category]||0) + 1;
   });
 
-  // Total de entradas (barras), con selector: por año o por categoría.
-  const barMode = state.historyBarMode === 'categoria' ? 'categoria' : 'anio';
-  let barsSection = `<div class="section-title-row">
-    <div class="section-title">Total ${barMode==='anio' ? 'por año' : 'por categoría'}</div>
-    <div class="seg seg-sm">
-      <button data-hbmode="anio" class="${barMode==='anio'?'active':''}">Año</button>
-      <button data-hbmode="categoria" class="${barMode==='categoria'?'active':''}">Categoría</button>
-    </div>
+  // Selector único: año (totales) o categoría — afecta a las barras Y a la línea.
+  const mode = state.historyMode === 'categoria' ? 'categoria' : 'anio';
+  const modeToggle = `<div class="seg seg-sm">
+    <button data-hmode="anio" class="${mode==='anio'?'active':''}">Año</button>
+    <button data-hmode="categoria" class="${mode==='categoria'?'active':''}">Categoría</button>
   </div>`;
-  if(barMode==='anio'){
+
+  // ---- Barras ----
+  let barsSection = `<div class="section-title-row">
+    <div class="section-title">Total ${mode==='anio' ? 'por año' : 'por categoría'}</div>
+    ${modeToggle}
+  </div>`;
+  if(mode==='anio'){
     const yearTotals = {};
     years.forEach(y=> yearTotals[y] = CAT_KEYS.reduce((sum,k)=> sum+perYear[y][k], 0));
     const maxYearTotal = Math.max(1, ...Object.values(yearTotals));
@@ -1468,45 +1465,72 @@ function renderHistoryChart(){
     });
   }
 
-  let maxVal = 1;
-  years.forEach(y=> CAT_KEYS.forEach(k=>{ maxVal = Math.max(maxVal, perYear[y][k]); }));
-
+  // ---- Línea ----
   const W = Math.max(300, years.length*60), H = 170;
   const padL=26, padR=12, padT=12, padB=22;
   const chartW = W-padL-padR, chartH = H-padT-padB;
   const xStep = years.length>1 ? chartW/(years.length-1) : 0;
   const xFor = i => padL + (years.length>1 ? i*xStep : chartW/2);
-  // Escala de raíz cuadrada en el eje Y: comprime los valores altos y separa
-  // los bajos, para que las líneas con pocas entradas no se amontonen abajo.
-  const sqrtMax = Math.sqrt(maxVal);
-  const yFor = v => padT + chartH - (Math.sqrt(v)/sqrtMax*chartH);
-
-  let grid = '';
-  const ySteps = Math.min(4, maxVal);
-  for(let s=0;s<=ySteps;s++){
-    const v = Math.round(maxVal*s/ySteps);
-    const y = yFor(v);
-    grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
-    grid += `<text x="${padL-5}" y="${y+3}" font-size="7.5" text-anchor="end" fill="var(--ink-soft)" font-family="monospace">${v}</text>`;
-  }
   let xLabels = '';
   years.forEach((y,i)=>{
     xLabels += `<text x="${xFor(i)}" y="${H-6}" font-size="7.5" text-anchor="middle" fill="var(--ink-soft)" font-family="monospace">${y}</text>`;
   });
-  let lines = '';
-  CAT_KEYS.forEach(k=>{
-    const pts = years.map((y,i)=> `${xFor(i)},${yFor(perYear[y][k])}`).join(' ');
-    lines += `<polyline points="${pts}" fill="none" stroke="var(--cat-${k})" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-    years.forEach((y,i)=>{ lines += `<circle cx="${xFor(i)}" cy="${yFor(perYear[y][k])}" r="2.5" fill="var(--cat-${k})"/>`; });
-  });
-  let legend = '<div class="history-legend">';
-  CAT_KEYS.forEach(k=>{ legend += `<div class="history-legend-item" style="--c:var(--cat-${k})">${ICONS[k]}<span>${CATEGORIES[k].label}</span></div>`; });
-  legend += '</div>';
+
+  let lineTitle, maxVal, lines = '', legend = '';
+  if(mode==='anio'){
+    lineTitle = 'Evolución del total';
+    const yearTotals = {};
+    years.forEach(y=> yearTotals[y] = CAT_KEYS.reduce((sum,k)=> sum+perYear[y][k], 0));
+    maxVal = Math.max(1, ...Object.values(yearTotals));
+    // Escala de raíz cuadrada: comprime los valores altos y separa los bajos.
+    const sqrtMax = Math.sqrt(maxVal);
+    const yFor = v => padT + chartH - (Math.sqrt(v)/sqrtMax*chartH);
+    var gridLines = '';
+    const ySteps = Math.min(4, maxVal);
+    for(let s=0;s<=ySteps;s++){
+      const v = Math.round(maxVal*s/ySteps);
+      const y = yFor(v);
+      gridLines += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+      gridLines += `<text x="${padL-5}" y="${y+3}" font-size="7.5" text-anchor="end" fill="var(--ink-soft)" font-family="monospace">${v}</text>`;
+    }
+    const pts = years.map((y,i)=> `${xFor(i)},${yFor(yearTotals[y])}`).join(' ');
+    lines = `<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    years.forEach((y,i)=>{ lines += `<circle cx="${xFor(i)}" cy="${yFor(yearTotals[y])}" r="2.5" fill="var(--accent)"/>`; });
+    var gridHTML = gridLines;
+  } else {
+    lineTitle = 'Evolución por categoría';
+    const activeCat = (state.historyCatFilter && CAT_KEYS.includes(state.historyCatFilter)) ? state.historyCatFilter : null;
+    const catsToShow = activeCat ? [activeCat] : CAT_KEYS;
+    maxVal = 1;
+    catsToShow.forEach(k=> years.forEach(y=>{ maxVal = Math.max(maxVal, perYear[y][k]); }));
+    const sqrtMax = Math.sqrt(maxVal);
+    const yFor = v => padT + chartH - (Math.sqrt(v)/sqrtMax*chartH);
+    let gl = '';
+    const ySteps = Math.min(4, maxVal);
+    for(let s=0;s<=ySteps;s++){
+      const v = Math.round(maxVal*s/ySteps);
+      const y = yFor(v);
+      gl += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+      gl += `<text x="${padL-5}" y="${y+3}" font-size="7.5" text-anchor="end" fill="var(--ink-soft)" font-family="monospace">${v}</text>`;
+    }
+    catsToShow.forEach(k=>{
+      const pts = years.map((y,i)=> `${xFor(i)},${yFor(perYear[y][k])}`).join(' ');
+      lines += `<polyline points="${pts}" fill="none" stroke="var(--cat-${k})" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+      years.forEach((y,i)=>{ lines += `<circle cx="${xFor(i)}" cy="${yFor(perYear[y][k])}" r="2.5" fill="var(--cat-${k})"/>`; });
+    });
+    legend = '<div class="history-legend">';
+    CAT_KEYS.forEach(k=>{
+      const isActive = activeCat===k;
+      legend += `<button type="button" class="history-legend-item ${isActive?'active':''}" data-catfilter="${k}" style="--c:var(--cat-${k})">${ICONS[k]}<span>${CATEGORIES[k].label}</span></button>`;
+    });
+    legend += '</div>';
+    var gridHTML = gl;
+  }
 
   return `${barsSection}
-  <div class="section-title">Evolución por categoría</div>
+  <div class="section-title">${lineTitle}</div>
   <div class="history-chart">
-    <svg viewBox="0 0 ${W} ${H}" class="history-svg">${grid}${lines}${xLabels}</svg>
+    <svg viewBox="0 0 ${W} ${H}" class="history-svg">${gridHTML}${lines}${xLabels}</svg>
     ${legend}
   </div>`;
 }
@@ -1556,8 +1580,15 @@ function bindStatsEvents(){
   if(ySel) ySel.addEventListener('change', e=>{ state.statsYear=Number(e.target.value); renderView(); });
   const mSel = document.getElementById('statsMonth');
   if(mSel) mSel.addEventListener('change', e=>{ state.statsMonth=Number(e.target.value); renderView(); });
-  document.querySelectorAll('[data-hbmode]').forEach(b=>{
-    b.addEventListener('click', ()=>{ state.historyBarMode=b.dataset.hbmode; renderView(); });
+  document.querySelectorAll('[data-hmode]').forEach(b=>{
+    b.addEventListener('click', ()=>{ state.historyMode=b.dataset.hmode; renderView(); });
+  });
+  document.querySelectorAll('[data-catfilter]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const k = b.dataset.catfilter;
+      state.historyCatFilter = (state.historyCatFilter===k) ? null : k;
+      renderView();
+    });
   });
 }
 
