@@ -374,12 +374,16 @@ button, input, select, textarea{font-family:inherit;}
 
 /* ===== Mosaic view ===== */
 .mosaic-grid{
-  column-width:110px; column-gap:8px;
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(96px, 1fr));
+  grid-auto-rows:4px;
+  gap:8px;
+  align-items:start;
 }
 .mosaic-tile{
   position:relative; background:var(--surface); border:1px solid var(--line); border-radius:4px;
   padding:5px 5px 8px 5px; box-shadow:var(--shadow); cursor:pointer;
-  break-inside:avoid; margin-bottom:8px; display:inline-block; width:100%;
+  min-width:0;
 }
 .mosaic-tile img{
   width:100%; height:auto; display:block; border-radius:2px; background:var(--paper);
@@ -567,7 +571,7 @@ button, input, select, textarea{font-family:inherit;}
   .topbar-actions{gap:7px;}
   .icon-btn{width:34px; height:34px;}
   .icon-btn svg{width:16px; height:16px;}
-  .mosaic-grid{column-count:3; column-width:auto;}
+  .mosaic-grid{grid-template-columns:repeat(3,1fr);}
   .brand-mark{font-size:24px;}
   .brand-icon{width:26px; height:26px;}
   .add-btn{padding:10px; border-radius:50%;}
@@ -1617,7 +1621,46 @@ function bindMosaicEvents(){
   document.querySelectorAll('.mosaic-tile').forEach(tile=>{
     tile.addEventListener('click', ()=> openModal(entries.find(e=>e.id===tile.dataset.id)) );
   });
+  initMosaicMasonry();
 }
+/* ---------- Empaquetado tipo mampostería en la vista Mosaico ----------
+   El grid usa filas muy finas (grid-auto-rows) y cada caja ocupa tantas de
+   esas filas como necesite según su altura real, calculada aquí. Al ser un
+   grid normal (no columnas CSS), el navegador coloca las cajas en orden de
+   fila (cronológico), y como cada una ocupa solo lo que mide de verdad, no
+   quedan huecos grandes entre ellas.                                     */
+function mosaicTileSpan(grid, tile){
+  const cs = getComputedStyle(grid);
+  const rowH = parseFloat(cs.gridAutoRows) || 4;
+  const rowGap = parseFloat(cs.rowGap) || 0;
+  const unit = rowH + rowGap;
+  const h = tile.getBoundingClientRect().height;
+  return Math.max(1, Math.ceil((h + rowGap) / unit));
+}
+function updateMosaicTile(tile){
+  const grid = tile.closest('.mosaic-grid');
+  if(!grid) return;
+  tile.style.gridRowEnd = 'span ' + mosaicTileSpan(grid, tile);
+}
+function initMosaicMasonry(){
+  document.querySelectorAll('.mosaic-tile').forEach(tile=>{
+    updateMosaicTile(tile);
+    const img = tile.querySelector('img');
+    if(img){
+      if(img.complete){ updateMosaicTile(tile); }
+      else{
+        img.addEventListener('load', ()=> updateMosaicTile(tile));
+        img.addEventListener('error', ()=> updateMosaicTile(tile));
+      }
+    }
+  });
+}
+let _mosaicResizeTimer = null;
+window.addEventListener('resize', ()=>{
+  if(state.view!=='mosaico') return;
+  clearTimeout(_mosaicResizeTimer);
+  _mosaicResizeTimer = setTimeout(initMosaicMasonry, 150);
+});
 function bindStatsEvents(){
   document.querySelectorAll('.stats-controls > .seg > button').forEach(b=>{
     b.addEventListener('click', ()=>{ state.statsMode=b.dataset.mode; renderView(); });
